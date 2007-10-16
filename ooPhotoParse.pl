@@ -40,7 +40,7 @@ sub new {
 
     if ( $params{file} ) {
 
-        return $self->load( $params{file} );
+        $self->load( $params{file} );
     }
 
     return $self;
@@ -73,7 +73,7 @@ sub load {
     # Load up the rolls
 
     while ( my $val = $iphoto_library->get( 'List of Rolls' )->next_entry ) {
-        $self->{rolls}->{$val->get( 'AlbumId' )} = new iPhotoLibrary::Album(
+        $self->{rolls}->{$val->get( 'RollID' )} = new iPhotoLibrary::Roll(
             library => $self,
             plist => $val,
         );
@@ -95,6 +95,16 @@ sub load {
 package iPhotoLibrary::Album;
 
 sub new {
+    my $proto = shift;
+    my $class = ref($proto) || $proto;
+
+    my %params = @_;
+
+    my $self = bless {}, $class;
+
+    $self->{library} = $library;
+
+    return $self;
 }
 
 1;
@@ -106,5 +116,36 @@ package iPhotoLibrary::Item;
 1;
 
 package iPhotoLibrary::Roll;
+
+my $BASE_TIME = timegm( 0, 0, 0, 1, 1, 2001 );
+
+sub new {
+    my $proto = shift;
+    my $class = ref($proto) || $proto;
+
+    my %params = @_;
+
+    my $self = bless {}, $class;
+
+    $self->{library} = $params{library};
+
+    if ( $params{plist} ) {
+        $self->load($params{plist});
+    }
+
+    return $self;
+}
+
+sub load {
+    my $self = shift;
+    my $plist = shift;
+
+    $self->{RollID} = $plist->get( 'RollID' );
+    $self->{PhotoCount} = $plist->get( 'PhotoCount' );
+    $self->{RollName} = $plist->get( 'RollName' );
+    $self->{RollDateTime} = $BASE_TIME + $plist->get( 'RollDateAsTimerInterval' );
+
+    # Load Photo IDs, cross-reference to photos themselves.
+}
 
 1;

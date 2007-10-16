@@ -31,6 +31,8 @@ my $filename = shift || 'AlbumData.xml';
 
 my $base_time = timegm( 0, 0, 0, 1, 1, 2001 );
 
+my $max_list = 20;
+
 print STDERR "File: $filename\n";
 
 print STDERR "Loading...";
@@ -64,51 +66,79 @@ my %images = ();
 
 my %albums = ();
 
-while ( my $key = $iphoto_library->get( 'Master Image List' )->next_key ) {
+my $mil = $iphoto_library->get( 'Master Image List' );
+
+while ( my $key = $mil->next_key ) {
     last if ($count > 3);
     print "Num ", $count++, " - $key\n";
 
-    foreach my $pkey ( $iphoto_library->get( 'Master Image List' )->get( $key )->keys ) {
-        print "  $pkey: ", $iphoto_library->get( 'Master Image List' )->get( $key )->get( $pkey ); 
+    foreach my $pkey ( $mil->get( $key )->keys ) {
+        print "  $pkey: ", $mil->get( $key )->get( $pkey ); 
         print " (", scalar localtime(
-            $base_time + $iphoto_library->get( 'Master Image List' )->get( $key )->get( $pkey )
+            $base_time + $mil->get( $key )->get( $pkey )
         ), ")" if ( $pkey =~ /Date/ );
         print "\n";
     }
 }
 
-print "--- 3 Rolls ---\n";
+my $lor = $iphoto_library->get( 'List of Rolls' );
+
+print "--- 3 Rolls (of ", $lor->count, ") ---\n";
 
 $count = 0;
 
-while ( my $val = $iphoto_library->get( 'List of Rolls' )->next_entry ) {
+while ( my $val = $lor->next_entry ) {
     last if ($count > 3);
     print "Num ", $count++, " - $val\n";
 
     foreach my $pkey ( $val->keys ) {
         print "  $pkey: ", $val->get( $pkey ); 
-        print "(", scalar localtime(
-            $val->get( $pkey )
+        print " (", scalar localtime(
+            $base_time + $val->get( $pkey )
         ), ")" if ( $pkey =~ /Date/ );
         print "\n";
+        if ( ref($val->get( $pkey )) eq 'Mac::PropertyList::Foundation::array' ) {
+            my $tmp_array = $val->get( $pkey );
+            my $tcnt = 0;
+            while ( my $ival = $tmp_array->next_entry ) {
+                print "    $ival\n";
+                if ( $tcnt++ > $max_list ) {
+                    print "     (etc)\n";
+                    last;
+                }
+            }
+        }
     }
 
 }
 
-print "--- 3 Albums ---\n";
+my $loa = $iphoto_library->get( 'List of Albums' );
+
+print "--- 3 Albums (of ", $loa->count, ") ---\n";
 
 $count = 0;
 
-while ( my $val = $iphoto_library->get( 'List of Albums' )->next_entry ) {
+while ( my $val = $loa->next_entry ) {
     last if ($count > 3);
     print "Num ", $count++, " - $val\n";
 
     foreach my $pkey ( $val->keys ) {
         print "  $pkey: ", $val->get( $pkey ); 
-        print "(", scalar localtime(
-            $val->get( $pkey )
+        print " (", scalar localtime(
+            $base_time + $val->get( $pkey )
         ), ")" if ( $pkey =~ /Date/ );
         print "\n";
+        if ( ref($val->get( $pkey )) eq 'Mac::PropertyList::Foundation::array' ) {
+            my $tmp_array = $val->get( $pkey );
+            my $tcnt = 0;
+            while ( my $ival = $tmp_array->next_entry ) {
+                print "    $ival\n";
+                if ( $tcnt++ > $max_list ) {
+                    print "     (etc)\n";
+                    last;
+                }
+            }
+        }
     }
 
 }
