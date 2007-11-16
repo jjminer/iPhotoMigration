@@ -58,7 +58,7 @@ foreach my $key ( $iphoto_library->get('List of Keywords')->keys ) {
     print "$key: ", $iphoto_library->get('List of Keywords')->get($key), "\n";
 }
 
-print "--- 3 Images ---\n";
+print "--- Images ---\n";
 
 my $count = 0;
 
@@ -68,82 +68,110 @@ my %albums = ();
 
 my $mil = $iphoto_library->get( 'Master Image List' );
 
-while ( my $key = $mil->next_key ) {
-    last if ($count > 3);
-    print "Num ", $count++, " - $key\n";
+my %mil_keys = ();
+my %rating_values = ();
+my %keyword_values = ();
 
-    print "Keywords: ", $mil->get( $key )->get( 'Keywords' ), "\n";
+while ( my $key = $mil->next_key ) {
+    $count++;
 
     foreach my $pkey ( $mil->get( $key )->keys ) {
-        print "  $pkey: ", $mil->get( $key )->get( $pkey ); 
-        print " (", scalar localtime(
-            $base_time + $mil->get( $key )->get( $pkey )
-        ), ")" if ( $pkey =~ /Date/ );
-        print "\n";
+        $mil_keys{ $pkey }++;
+        if ( "$pkey" eq 'Rating' ) {
+            $rating_values{$mil->get( $key )->get( $pkey )}++;
+        }
+        if ( "$pkey" eq 'Keywords' ) {
+            $keyword_values{join(',', $mil->get( $key )->get( $pkey )->values)}++;
+        }
     }
 }
+
+print "Image Count: $count\n";
+print "Image Keys:\n";
+print map "  $_: $mil_keys{$_}\n", keys %mil_keys;
+print "\n";
+print "Rating Values:\n";
+print map "  $_: $rating_values{$_}\n", keys %rating_values;
+print "\n";
+print "Keyword Values:\n";
+print map "  $_: $keyword_values{$_}\n", keys %keyword_values;
+print "\n";
 
 my $lor = $iphoto_library->get( 'List of Rolls' );
 
-print "--- 3 Rolls (of ", $lor->count, ") ---\n";
+print "--- Rolls (of ", $lor->count, ") ---\n";
 
 $count = 0;
 
+my %roll_keys = ();
+
 while ( my $val = $lor->next_entry ) {
-    last if ($count > 3);
-    print "Num ", $count++, " - $val\n";
+    $count++;
 
     foreach my $pkey ( $val->keys ) {
-        print "  $pkey: ", $val->get( $pkey ); 
-        print " (", scalar localtime(
-            $base_time + $val->get( $pkey )
-        ), ")" if ( $pkey =~ /Date/ );
-        print "\n";
-        if ( ref($val->get( $pkey )) eq 'Mac::PropertyList::Foundation::array' ) {
-            my $tmp_array = $val->get( $pkey );
-            my $tcnt = 0;
-            while ( my $ival = $tmp_array->next_entry ) {
-                print "    $ival\n";
-                if ( $tcnt++ > $max_list ) {
-                    print "     (etc)\n";
-                    last;
-                }
-            }
-        }
+        $roll_keys{$pkey}++;
     }
-
 }
+print "Roll Count: $count\n";
+print "Roll Keys:\n";
+print map "  $_: $roll_keys{$_}\n", keys %roll_keys;
+print "\n";
 
 my $loa = $iphoto_library->get( 'List of Albums' );
 
-print "--- 3 Albums (of ", $loa->count, ") ---\n";
+print "--- Albums (of ", $loa->count, ") ---\n";
 
 $count = 0;
 
+my %album_keys = ();
+my %album_types = ();
+
 while ( my $val = $loa->next_entry ) {
-    last if ($count > 3);
-    print "Num ", $count++, " - $val\n";
+    $count++;
 
     foreach my $pkey ( $val->keys ) {
-        print "  $pkey: ", $val->get( $pkey ); 
-        print " (", scalar localtime(
-            $base_time + $val->get( $pkey )
-        ), ")" if ( $pkey =~ /Date/ );
-        print "\n";
-        if ( ref($val->get( $pkey )) eq 'Mac::PropertyList::Foundation::array' ) {
-            my $tmp_array = $val->get( $pkey );
-            my $tcnt = 0;
-            while ( my $ival = $tmp_array->next_entry ) {
-                print "    $ival\n";
-                if ( $tcnt++ > $max_list ) {
-                    print "     (etc)\n";
-                    last;
+        $album_keys{$pkey}++;
+
+        if ( "$pkey" eq 'Album Type' ) {
+            $album_types{$val->get($pkey)}++;
+        }
+
+        if (
+            !defined( $val->get( 'Album Type' )) 
+            # || $val->get( 'Album Type' ) eq 'Special Month'
+            # || $val->get( 'Album Type' ) eq 'Special Roll'
+            # || $val->get( 'Album Type' ) eq 'Shelf'
+            # || $val->get( 'Master' )
+            || $val->get( 'Album Type' ) eq 'Folder'
+        ) {
+            print "  $pkey: ", $val->get( $pkey ); 
+            print " (", scalar localtime(
+                $base_time + $val->get( $pkey )
+            ), ")" if ( $pkey =~ /Date/ );
+            print "\n";
+            if ( ref($val->get( $pkey )) eq 'Mac::PropertyList::Foundation::array' ) {
+                my $tmp_array = $val->get( $pkey );
+                my $tcnt = 0;
+                while ( my $ival = $tmp_array->next_entry ) {
+                    print "    $ival\n";
+                    if ( $tcnt++ > $max_list ) {
+                        print "     (etc)\n";
+                        last;
+                    }
                 }
             }
         }
     }
 
 }
+
+print "Album Count: $count\n";
+print "Album Keys:\n";
+print map "  $_: $album_keys{$_}\n", keys %album_keys;
+print "\n";
+print "Album Types\n";
+print map "  $_: $album_types{$_}\n", keys %album_types;
+print "\n";
 
 __END__
 sub perlValue {

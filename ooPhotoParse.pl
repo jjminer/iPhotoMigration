@@ -30,6 +30,10 @@ package iPhotoLibrary;
 
 use Mac::PropertyList::Foundation;
 
+use vars qw/$BASE_TIME/;
+
+$BASE_TIME = timegm( 0, 0, 0, 1, 1, 2001 );
+
 sub new {
     my $proto = shift;
     my $class = ref($proto) || $proto;
@@ -55,18 +59,24 @@ sub load {
     }
     my $file = shift;
 
-    my $lib = $self->{plist} = new Mac::PropertyList::Foundation(
-        file => $filename
+    my $iphoto_library = $self->{plist} = new Mac::PropertyList::Foundation(
+        file => $file
     );
+
+    my $lok = $iphoto_library->get('List of Keywords');
+    foreach my $key ( $lok->keys ) {
+        $self->{keywords}->{$key} = $lok->get( $key );
+    }
 
     # Load up the images
     #
     # First so we can update each record with the Album/Roll info as we go.
 
-    while ( my $key = $iphoto_library->get( 'Master Image List' )->next_entry ) {
-        $self->{images}->{$key} = new iPhotoLibrary::Album(
+    while ( my $key = $iphoto_library->get( 'Master Image List' )->next_key ) {
+        $self->{images}->{$key} = new iPhotoLibrary::Item(
             library => $self,
-            plist => $val,
+            plist => $iphoto_library->get( 'Master Image List' )->get( $key ),
+            id => $key,
         );
     }
 
@@ -102,22 +112,127 @@ sub new {
 
     my $self = bless {}, $class;
 
-    $self->{library} = $library;
+    $self->{library} = $params{library};
 
     return $self;
+}
+
+my %alb_keys = (
+    AlbumID => 'ID',
+    PhotoCount => 'PhotoCount',
+    AlbumName => 'Name',
+    Comments => 'Comments',
+    Parent => 'Parent',
+    'Album Type' => 'Type',
+);
+
+sub load {
+    my $self = shift;
+    my $plist = shift;
+
+    foreach my $key ( keys %alb_keys ) {
+        next unless ( defined( $plist->get( $key ) ) );
+        $self->{ $alb_keys{$key} } = $plist->get( $key );
+    }
+
+    # Load Photo IDs, cross-reference to photos themselves.
+
+    if (
+        defined($plist->get( 'Album Type' ))
+        && $plist->get( 'Album Type' ) eq 'Regular'
+    ) {
+        foreach my $key ( $plist->get( 'KeyList' )->values ) {
+            $self->{library}->{images}->{$key}->add_album( $self->{ID} );
+        }
+    }
 }
 
 1;
 
 package iPhotoLibrary::Item;
 
+sub new {
+    my $proto = shift;
+    my $class = ref($proto) || $proto;
+
+    my %params = @_;
+
+    my $self = bless {}, $class;
+
+    $self->{library} = $params{library};
+
+    if ( $params{id} ) {
+        $self->{ID} = $params{id};
+    }
+
+    if ( $params{plist} ) {
+        $self->load($params{plist});
+    }
+
+    return $self;
+}
+
+my %image_keys = (
+    ModDateAsTimerInterval => [ 'ModDate', 'Date' ],
+    OriginalPath => undef,
+    ImagePath => undef,
+    MetaModDate => [ 'MetaModDate', 'Date' ],
+    Comment => undef,
+    MediaType => undef,
+    Date => [ 'Date', 'Date' ],
+    Rating => undef,
+    Caption => undef,
+    Keywords => [ 'Keywords', 'Array' ],
+    JpegIsCacheForRAW => [ 'RAW', undef ],
+    RotationIsOnlyEdit => [ 'RotatedOnly', undef ],
+    Roll => undef,
+);
+
 # Need to handle the orignal vs modified path issue.
+
+sub load {
+    my $self = shift;
+    my $plist = shift;
+
+    foreach my $key ( keys %image_keys ) {
+        next unless ( defined( $plist->get( $key ) ) );
+
+        if ( !defined( $image_keys{$key} ) ) {
+            $self->{$key} = $plist->get( $key );
+        } else {
+            if ( !defined($image_keys{$key}->[1]) ) {
+                $self->{$image_keys{$key}->[0]} = $plist->get( $key );
+            } elsif ( $image_keys{$key}->[1] eq 'Array' ) {
+                $self->{$image_keys{$key}->[0]} = [ $plist->get( $key )->values ];
+            } elsif ( $image_keys{$key}->[1] eq 'Date' ) {
+                $self->{$image_keys{$key}->[0]} = $iPhotoLibrary::BASE_TIME + $plist->get( $key );
+            } else {
+                die( "Unexpected values for key $key!" );
+            }
+        }
+    }
+
+}
+
+sub add_album {
+    my $self = shift;
+    my $albumid = shift;
+    
+    push @{$self->{Album}}, $albumid;
+}
+
+sub add_roll {
+    my $self = shift;
+    my $rollid = shift;
+
+    if ( defined($self->{Roll}) && $self->{Roll} != $rollid ) {
+        carp( "WTF?  Image ", $self->{ID}, " has roll ", $self->{Roll}, " but $rollid claims it.");
+    }
+}
 
 1;
 
 package iPhotoLibrary::Roll;
-
-my $BASE_TIME = timegm( 0, 0, 0, 1, 1, 2001 );
 
 sub new {
     my $proto = shift;
@@ -140,12 +255,16 @@ sub load {
     my $self = shift;
     my $plist = shift;
 
-    $self->{RollID} = $plist->get( 'RollID' );
+    $self->{ID} = $plist->get( 'RollID' );
     $self->{PhotoCount} = $plist->get( 'PhotoCount' );
-    $self->{RollName} = $plist->get( 'RollName' );
-    $self->{RollDateTime} = $BASE_TIME + $plist->get( 'RollDateAsTimerInterval' );
+    $self->{Name} = $plist->get( 'RollName' );
+    $self->{Date} = $iPhotoLibrary::BASE_TIME + $plist->get( 'RollDateAsTimerInterval' );
+    $self->{Comments} = $plist->get( 'Comments' );
 
     # Load Photo IDs, cross-reference to photos themselves.
+    foreach my $key ( $plist->get( 'KeyList' )->values ) {
+        $self->{library}->{images}->{$key}->add_roll( $self->{ID} );
+    }
 }
 
 1;
