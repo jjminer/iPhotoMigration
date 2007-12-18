@@ -30,6 +30,8 @@ package iPhotoLibrary;
 
 use Mac::PropertyList::Foundation;
 
+use Time::Local;
+
 use vars qw/$BASE_TIME/;
 
 $BASE_TIME = timegm( 0, 0, 0, 1, 1, 2001 );
@@ -42,8 +44,9 @@ sub new {
 
     my $self = bless {}, $class;
 
-    if ( $params{file} ) {
+    $self->{debug} = $params{debug} || 0;
 
+    if ( $params{file} ) {
         $self->load( $params{file} );
     }
 
@@ -64,39 +67,62 @@ sub load {
     );
 
     my $lok = $iphoto_library->get('List of Keywords');
+    my $count = 0;
+    print STDERR "Loading Keywords....";
     foreach my $key ( $lok->keys ) {
+        print STDERR "." if ( (++$count % 10) == 0);
+        print STDERR $count if ( ($count % 50 ) == 0 );
         $self->{keywords}->{$key} = $lok->get( $key );
     }
+    print STDERR ".${count}done\n";
 
     # Load up the images
     #
     # First so we can update each record with the Album/Roll info as we go.
 
-    while ( my $key = $iphoto_library->get( 'Master Image List' )->next_key ) {
-        $self->{images}->{$key} = new iPhotoLibrary::Item(
+    print STDERR "Loading Images....";
+    $count = 0;
+    my $mil = $iphoto_library->get( 'Master Image List' );
+    foreach my $key ( $mil->keys ) {
+        print STDERR "." if ( (++$count % 100) == 0);
+        print STDERR "$count($key)" if ( ($count % 1000 ) == 0 );
+        $self->{images}->{$key} = iPhotoLibrary::Item->new(
             library => $self,
-            plist => $iphoto_library->get( 'Master Image List' )->get( $key ),
+            plist => $mil->get( $key ),
             id => $key,
         );
     }
+    print STDERR ".${count}done\n";
 
     # Load up the rolls
 
-    while ( my $val = $iphoto_library->get( 'List of Rolls' )->next_entry ) {
-        $self->{rolls}->{$val->get( 'RollID' )} = new iPhotoLibrary::Roll(
+    print STDERR "Loading Rolls....";
+    $count = 0;
+    my $lor = $iphoto_library->get( 'List of Rolls' );
+    while ( my $val = $lor->next_entry ) {
+        print STDERR "." if ( (++$count % 100) == 0);
+        print STDERR $count if ( ($count % 1000 ) == 0 );
+        $self->{rolls}->{$val->get( 'RollID' )} = iPhotoLibrary::Roll->new(
             library => $self,
             plist => $val,
         );
     }
+    print STDERR ".${count}done\n";
 
     # Load up the albums
 
-    while ( my $val = $iphoto_library->get( 'List of Albums' )->next_entry ) {
-        $self->{albums}->{$val->get( 'AlbumId' )} = new iPhotoLibrary::Album(
+    print STDERR "Loading Albums....";
+    $count = 0;
+    my $loa = $iphoto_library->get( 'List of Albums' );
+    while ( my $val = $loa->next_entry ) {
+        print STDERR "." if ( (++$count % 100) == 0);
+        print STDERR $count if ( ($count % 1000 ) == 0 );
+        $self->{albums}->{$val->get( 'AlbumId' )} = iPhotoLibrary::Album->new(
             library => $self,
             plist => $val,
         );
     }
+    print STDERR ".${count}done\n";
 
 }
 
@@ -114,11 +140,15 @@ sub new {
 
     $self->{library} = $params{library};
 
+    if ( $params{plist} ) {
+        $self->load($params{plist});
+    }
+
     return $self;
 }
 
 my %alb_keys = (
-    AlbumID => 'ID',
+    AlbumId => 'ID',
     PhotoCount => 'PhotoCount',
     AlbumName => 'Name',
     Comments => 'Comments',
@@ -131,20 +161,49 @@ sub load {
     my $plist = shift;
 
     foreach my $key ( keys %alb_keys ) {
-        next unless ( defined( $plist->get( $key ) ) );
-        $self->{ $alb_keys{$key} } = $plist->get( $key );
+        my $val = $plist->get( $key );
+        # print STDERR "KEY: $key -> $alb_keys{$key} = $val\n";
+        next unless ( defined( $val ) );
+        $self->{ $alb_keys{$key} } = $val;
     }
+
+    $self->{Items} = [ $plist->get( 'KeyList' )->values ];
 
     # Load Photo IDs, cross-reference to photos themselves.
 
+    # print STDERR "Album: ", $self->{Name}, "\n";
+    # print STDERR "Type: ", $self->{Type}, "\n";
+    # print STDERR "ID ", $self->{ID}, "\n";
+
+    # sleep 300;
+
     if (
-        defined($plist->get( 'Album Type' ))
-        && $plist->get( 'Album Type' ) eq 'Regular'
+        defined($self->{Type})
+        && $self->{Type} eq 'Regular'
     ) {
-        foreach my $key ( $plist->get( 'KeyList' )->values ) {
+        foreach my $key ( @{$self->{Items}} ) {
+            # print STDERR "Album: $key\n";
             $self->{library}->{images}->{$key}->add_album( $self->{ID} );
         }
     }
+
+    if ( defined($self->{Parent}) ) {
+        if ( defined( $self->{library}->{albums}->{$self->{Parent}} ) ) {
+            $self->{library}->{albums}->{$self->{Parent}}->set_child( $self->{ID} );
+        } else {
+            print STDERR "Hmm... Got child ", $self->{ID}, " of ", $self->{Parent}, " before parent...\n";
+            sleep 10;
+        }
+    }
+}
+
+sub set_child {
+    my $self = shift;
+    my $childid = shift;
+
+    print STDERR "Adding child album $childid to ", $self->{ID}, "\n";
+
+    push @{$self->{Children}}, $childid;
 }
 
 1;
@@ -217,6 +276,8 @@ sub load {
 sub add_album {
     my $self = shift;
     my $albumid = shift;
+
+    # print STDERR "Addling album $albumid to ", $self->{ID}, "\n";
     
     push @{$self->{Album}}, $albumid;
 }
@@ -260,11 +321,32 @@ sub load {
     $self->{Name} = $plist->get( 'RollName' );
     $self->{Date} = $iPhotoLibrary::BASE_TIME + $plist->get( 'RollDateAsTimerInterval' );
     $self->{Comments} = $plist->get( 'Comments' );
+    $self->{Items} = [ $plist->get( 'KeyList' )->values ];
 
     # Load Photo IDs, cross-reference to photos themselves.
-    foreach my $key ( $plist->get( 'KeyList' )->values ) {
+    foreach my $key ( @{$self->{Items}} ) {
         $self->{library}->{images}->{$key}->add_roll( $self->{ID} );
     }
 }
 
 1;
+
+package main;
+
+use Data::Dumper;
+
+my $library = new iPhotoLibrary(
+    file => 'AlbumData.xml',
+    debug => 1,
+);
+
+print STDERR "Sleeeping......";
+
+sleep(20);
+
+open DUMP, '>iphotolibrary.dump';
+print DUMP Dumper( $library ), "\n";
+close DUMP;
+
+1;
+
