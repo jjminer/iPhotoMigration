@@ -55,18 +55,7 @@ my $library = new iPhotoLibrary(
     debug => 1,
 );
 
-foreach my $img_num ( 5554, 23397, 6474 ) {
-    my $image = $library->get_image( $img_num );
+open DUMP, '>iphotolibrary.dump';
+print DUMP Dumper( $library ), "\n";
+close DUMP;
 
-# foreach my $image ( $library->images ) {
-    print "Image: ", $image->{ID}, "\n";
-    foreach my $key ( keys %{ $image } ) {
-        print "   $key: ";
-        if ( ref( $image->{$key} ) eq 'ARRAY' ) {
-            print join( ', ', @{$image->{$key}});
-        } else {
-            print $image->{$key};
-        }
-        print "\n";
-    }
-}

@@ -53,7 +53,6 @@ sub new {
     return $self;
 }
 
-
 sub load {
     my $self = shift;
 
@@ -70,11 +69,11 @@ sub load {
     my $count = 0;
     print STDERR "Loading Keywords....";
     foreach my $key ( $lok->keys ) {
-        print STDERR "." if ( (++$count % 10) == 0);
-        print STDERR $count if ( ($count % 50 ) == 0 );
+        print STDERR "." if ( (++$count % 20) == 0);
+        # print STDERR $count if ( ($count % 50 ) == 0 );
         $self->{keywords}->{$key} = $lok->get( $key );
     }
-    print STDERR ".${count}done\n";
+    print STDERR ". ${count} done\n";
 
     # Load up the images
     #
@@ -85,14 +84,14 @@ sub load {
     my $mil = $iphoto_library->get( 'Master Image List' );
     foreach my $key ( $mil->keys ) {
         print STDERR "." if ( (++$count % 100) == 0);
-        print STDERR "$count($key)" if ( ($count % 1000 ) == 0 );
+        # print STDERR "$count($key)" if ( ($count % 1000 ) == 0 );
         $self->{images}->{$key} = iPhotoLibrary::Item->new(
             library => $self,
             plist => $mil->get( $key ),
             id => $key,
         );
     }
-    print STDERR ".${count}done\n";
+    print STDERR ". ${count} done\n";
 
     # Load up the rolls
 
@@ -101,13 +100,13 @@ sub load {
     my $lor = $iphoto_library->get( 'List of Rolls' );
     while ( my $val = $lor->next_entry ) {
         print STDERR "." if ( (++$count % 100) == 0);
-        print STDERR $count if ( ($count % 1000 ) == 0 );
+        # print STDERR $count if ( ($count % 1000 ) == 0 );
         $self->{rolls}->{$val->get( 'RollID' )} = iPhotoLibrary::Roll->new(
             library => $self,
             plist => $val,
         );
     }
-    print STDERR ".${count}done\n";
+    print STDERR ". ${count} done\n";
 
     # Load up the albums
 
@@ -116,15 +115,31 @@ sub load {
     my $loa = $iphoto_library->get( 'List of Albums' );
     while ( my $val = $loa->next_entry ) {
         print STDERR "." if ( (++$count % 100) == 0);
-        print STDERR $count if ( ($count % 1000 ) == 0 );
+        # print STDERR $count if ( ($count % 1000 ) == 0 );
         $self->{albums}->{$val->get( 'AlbumId' )} = iPhotoLibrary::Album->new(
             library => $self,
             plist => $val,
         );
     }
-    print STDERR ".${count}done\n";
+    print STDERR ". ${count} done\n";
 
 }
+
+sub images {
+    my $self = shift;
+
+    return values %{$self->{images}};
+}
+
+sub get_image {
+    my $self = shift;
+    my $num = shift;
+
+    return unless ( defined( $num ) );
+
+    return $self->{images}->{$num};
+}
+
 
 1;
 
@@ -201,7 +216,7 @@ sub set_child {
     my $self = shift;
     my $childid = shift;
 
-    print STDERR "Adding child album $childid to ", $self->{ID}, "\n";
+    # print STDERR "Adding child album $childid to ", $self->{ID}, "\n";
 
     push @{$self->{Children}}, $childid;
 }
@@ -235,10 +250,10 @@ my %image_keys = (
     ModDateAsTimerInterval => [ 'ModDate', 'Date' ],
     OriginalPath => undef,
     ImagePath => undef,
-    MetaModDate => [ 'MetaModDate', 'Date' ],
+    MetaModDateAsTimerInterval => [ 'MetaModDate', 'Date' ],
     Comment => undef,
     MediaType => undef,
-    Date => [ 'Date', 'Date' ],
+    DateAsTimerInterval => [ 'Date', 'Date' ],
     Rating => undef,
     Caption => undef,
     Keywords => [ 'Keywords', 'Array' ],
@@ -328,7 +343,5 @@ sub load {
         $self->{library}->{images}->{$key}->add_roll( $self->{ID} );
     }
 }
-
-1;
 
 1;
