@@ -140,6 +140,27 @@ sub get_image {
     return $self->{images}->{$num};
 }
 
+sub albums {
+    my $self = shift;
+
+    return values %{$self->{albums}};
+}
+
+sub get_album {
+    my $self = shift;
+    my $num = shift;
+
+    return unless ( defined( $num ) );
+    return $self->{albums}->{$num};
+}
+
+sub get_keyword {
+    my $self = shift;
+    my $num = shift;
+
+    return unless ( defined( $num ) );
+    return $self->{keywords}->{$num};
+}
 
 1;
 
@@ -220,6 +241,25 @@ sub set_child {
 
     push @{$self->{Children}}, $childid;
 }
+
+sub album_path {
+    my $self = shift;
+
+    if ( defined( $self->{Parent} ) ) {
+        return $self->{library}->get_album( $self->{Parent} )->album_path, $self->{ID};
+    }
+
+    return $self->{ID};
+}
+
+=for go away
+sub DESTROY {
+    my $self = shift;
+
+    print ref($self), " In destroy for ", $self->{ID}, "\n";
+    delete( $self->{library} );
+}
+=cut
 
 1;
 
@@ -305,6 +345,14 @@ sub add_roll {
         carp( "WTF?  Image ", $self->{ID}, " has roll ", $self->{Roll}, " but $rollid claims it.");
     }
 }
+=for go away
+sub DESTROY {
+    my $self = shift;
+
+    print ref($self), " In destroy for ", $self->{ID}, "\n";
+    delete( $self->{library} );
+}
+=cut
 
 1;
 
@@ -343,5 +391,14 @@ sub load {
         $self->{library}->{images}->{$key}->add_roll( $self->{ID} );
     }
 }
+
+=for go away
+sub DESTROY {
+    my $self = shift;
+
+    print ref($self), " In destroy for ", $self->{ID}, "\n";
+    delete( $self->{library} );
+}
+=cut
 
 1;
