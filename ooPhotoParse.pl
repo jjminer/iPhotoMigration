@@ -140,7 +140,19 @@ foreach my $img_num ( 5554, 23397, 6474, 7652 ) {
         $exifTool->SetNewValue( 'Keywords', [ @keywords, @albums ] ) if ( scalar @keywords );
 
         my $caption = $image->{Caption};
-        $exifTool->SetNewValue( 'Title', $caption ) if ( $caption );
+        print "Caption: $caption\n";
+        if (
+            $caption eq basename( $file )
+            || $caption eq basename( $file, '.jpg' )
+            || $caption eq basename( $file, '.jpeg' )
+            || $caption eq basename( $file, '.JPG' )
+            || $caption eq basename( $file, '.JPEG' )
+        ) {
+            print "Caption is Base name.\n";
+            $caption = undef;
+        }
+        $exifTool->SetNewValue( 'Title', $caption ) if ( defined($caption) );
+        $exifTool->SetNewValue( 'ObjectName', $caption ) if ( defined($caption) );
 
         print "Writing $file..\n";
         my $retval = $exifTool->WriteInfo( $file );
