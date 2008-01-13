@@ -65,28 +65,42 @@ my $file_loc = (
 
 open VERBOSELOG, ">>verbose_exif.log";
 
-foreach my $img_num ( 5554, 23397, 6474, 7652 ) {
+foreach my $img_num (
+    5554,
+    23397,
+    6474,
+    7652,
+    21836,
+    21881,
+    23792,
+) {
     my $image = $library->get_image( $img_num );
 
-    print "Image: ", $image->{ID}, "\n";
+    print STDERR "Image: ", $image->{ID}, "\n";
     foreach my $key ( keys %{ $image } ) {
-        print "   $key: ";
+        print STDERR "   $key: ";
         if ( ref( $image->{$key} ) eq 'ARRAY' ) {
-            print join( ', ', @{$image->{$key}});
+            print STDERR join( ', ', @{$image->{$key}});
         } else {
-            print $image->{$key};
+            print STDERR $image->{$key};
         }
-        print "\n";
+        print STDERR "\n";
     }
 
     my @files = ();
 
-    if ( defined($image->{OriginalPath}) ) {
+    if ( defined($image->{OriginalPath}) && ! defined( $image->{RAW} )) {
         push @files, img_copy(  $image->{OriginalPath}, 'Orig', $image->{Roll} );
     }
-    push @files, img_copy(  $image->{ImagePath}, 'Images', $image->{Roll} );
+    # If RAW, copy it to the image directory and skip the JPG, it's only a cache
+    # of the RAW.
+    push @files, img_copy(
+        defined( $image->{RAW} ) ? $image->{OriginalPath} : $image->{ImagePath},
+        'Images',
+        $image->{Roll}
+    );
 
-    print "Files: ", join( ',', @files ), "\n";
+    print STDERR "Files: ", join( ',', @files ), "\n";
 
     foreach my $file ( @files ) {
         my $exifTool = new Image::ExifTool;
@@ -95,7 +109,7 @@ foreach my $img_num ( 5554, 23397, 6474, 7652 ) {
         $exifTool->Options( 'TextOut' => \*VERBOSELOG );
         $exifTool->Options( 'Verbose' => 3 );
 
-        print "Processing $file...\n";
+        print STDERR "Processing $file...\n";
 
         unless( $exifTool->ExtractInfo( $file ) ) {
             print STDERR "  Error reading $file.. WTF?\n";
@@ -103,17 +117,17 @@ foreach my $img_num ( 5554, 23397, 6474, 7652 ) {
         }
 
         if ( $exifTool->GetValue( 'Warning' ) ) {
-            print "  Warning: ", $exifTool->GetValue( 'Warning' ), "\n";
+            print STDERR "  Warning: ", $exifTool->GetValue( 'Warning' ), "\n";
         }
 
-        print "   Found Tags ($file):\n", map( "    $_\n", $exifTool->GetFoundTags ), "\n\n";
+        print STDERR "   Found Tags ($file):\n", map( "    $_\n", $exifTool->GetFoundTags ), "\n\n";
 
         my $comment = $exifTool->GetValue( 'Comment' );
         # $comment =~ s/\r//g;
-        print "Comment: $comment\n" if ( $comment );
+        print STDERR "Comment: $comment\n" if ( $comment );
 
         if ( $comment =~ /KONICA MINOLTA DIGITAL CAMERA/ ) {
-            print "  Comment is camera!\n";
+            print STDERR "  Comment is camera!\n";
             # delete it.
             $exifTool->SetNewValue( 'Comment' );
         }
@@ -121,47 +135,101 @@ foreach my $img_num ( 5554, 23397, 6474, 7652 ) {
         my $descr = $exifTool->GetValue( 'ImageDescription' );
 
         if ( $descr  =~ /KONICA MINOLTA DIGITAL CAMERA/ ) {
-            print "  Description is camera!\n";
+            print STDERR "  Description is camera!\n";
             # delete it.
             $exifTool->SetNewValue( 'ImageDescription' );
         }
 
+        my $retval = undef;
+        my $errstr = undef;
+
         $comment = $image->{Comment};
-        $exifTool->SetNewValue( 'Comment', $comment ) if ( $comment );
-        my @keywords = map sprintf( 'iPhotoKeyword-%s', $library->get_keyword( $_ )), @{ $image->{Keywords} } if ( $image->{Keywords} );
+        if ( defined($comment) ) {
+            foreach my $attr ( 'Description', 'Caption-Abstract' ) {
+                ($retval, $errstr) = $exifTool->SetNewValue( $attr, $comment );
+                if ( $retval == 0 || defined($errstr) ) {
+                    print STDERR "Error on $attr ($retval): $errstr\n";
+                }
+            }
+        }
+
+        my @keywords = ();
+        
+        @keywords = map sprintf( 'iPhotoKeyword-%s', $library->get_keyword( $_ )), @{ $image->{Keywords} } if ( $image->{Keywords} );
+
+        print STDERR "Keywords 1: ", join( ', ', @keywords ), "\n";
         
         my @albums = ();
         foreach my $a ( ref( $image->{Album} ) ? @{ $image->{Album} } : $image->{Album} ) {
-            push @albums, sprintf( 'iPhotoAlbum-%s', join( '-', map( $library->get_album( $_ )->{Name}, $library->get_album( $a )->album_path ) ) );
+            push @albums, sprintf( 'iPhotoAlbum-%s', join( '-', map( $library->get_album( $_ )->{Name}, $library->get_album( $a )->album_path ) ) ) if (defined($a));
         }
 
-        print "Keywords: ", join( ',', @keywords ), "\n";
-        print "Albums: ", join( ',', @albums ), "\n";
-        $exifTool->SetNewValue( 'Keywords', [ @keywords, @albums ] ) if ( scalar @keywords );
+        push @albums, sprintf( 'iPhotoRoll-%d-%s', $image->{Roll}, $library->{rolls}->{ $image->{Roll} }->{Name} );
+
+        if ( defined($image->{OriginalPath}) ) {
+            print STDERR "Photo has Original Path.\n";
+            if ( $file =~ /Orig/ ) {
+                push @keywords, 'iPhotoOriginalImage';
+            } else {
+                push @keywords, 'iPhotoModifiedImage';
+            }
+            if ( $image->{RotatedOnly} ) {
+                push @keywords, 'iPhotoRotatedOnly';
+            }
+        }
+
+        print STDERR "Keywords: ", join( ',', @keywords ), "\n";
+        print STDERR "Albums: ", join( ',', @albums ), "\n";
+        if ( scalar @keywords || scalar @albums ) {
+            print STDERR "Setting Keywords to: ", join( ',', @keywords, @albums ), "\n";
+            ($retval, $errstr) = $exifTool->SetNewValue( 'Keywords', [ @keywords, @albums ] );
+            print STDERR "Set $retval values..\n";
+            if ( defined($errstr) ) {
+                print STDERR "Error on Keywords ($retval): $errstr\n";
+            }
+        }
 
         my $caption = $image->{Caption};
-        print "Caption: $caption\n";
+        print STDERR "Caption: $caption\n";
         if (
             $caption eq basename( $file )
             || $caption eq basename( $file, '.jpg' )
             || $caption eq basename( $file, '.jpeg' )
             || $caption eq basename( $file, '.JPG' )
             || $caption eq basename( $file, '.JPEG' )
+            || $caption eq basename( $file, '.nef' )
+            || $caption eq basename( $file, '.NEF' )
         ) {
-            print "Caption is Base name.\n";
+            print STDERR "Caption is Base name.\n";
             $caption = undef;
         }
-        $exifTool->SetNewValue( 'Title', $caption ) if ( defined($caption) );
-        $exifTool->SetNewValue( 'ObjectName', $caption ) if ( defined($caption) );
 
-        print "Writing $file..\n";
+        ($retval, $errstr) = $exifTool->SetNewValue( 'Title', $caption ) if ( defined($caption) );
+        if ( $retval == 0 || defined($errstr) ) {
+            print STDERR "Error on Title ($retval): $errstr\n";
+        }
+        ($retval, $errstr) = $exifTool->SetNewValue( 'ObjectName', $caption ) if ( defined($caption) );
+        if ( $retval == 0 || defined($errstr) ) {
+            print STDERR "Error on ObjectName ($retval): $errstr\n";
+        }
+
+        my $rating = $image->{Rating};
+
+        print STDERR "Rating: $rating\n";
+
+        ($retval, $errstr) = $exifTool->SetNewValue( 'Rating', $image->{Rating} ) if ( $image->{Rating} );
+        if ( $retval == 0 || defined($errstr) ) {
+            print STDERR "Error on Rating ($retval): $errstr\n";
+        }
+
+        print STDERR "Writing $file..\n";
         my $retval = $exifTool->WriteInfo( $file );
 
-        print "No changes made on write.." if ($retval == 2);
+        print STDERR "No changes made on write..\n" if ($retval == 2);
 
         unless ($retval) {
-            print "Error: ", $exifTool->GetValue( 'Error' );
-            print "Warning: ", $exifTool->GetValue( 'Warning' );
+            print STDERR "Error: ", $exifTool->GetValue( 'Error' );
+            print STDERR "Warning: ", $exifTool->GetValue( 'Warning' );
         }
     }
 

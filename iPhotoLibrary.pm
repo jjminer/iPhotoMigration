@@ -34,7 +34,7 @@ use Time::Local;
 
 use vars qw/$BASE_TIME/;
 
-$BASE_TIME = timegm( 0, 0, 0, 1, 1, 2001 );
+$BASE_TIME = timegm( 0, 0, 0, 1, 0, 2001 );
 
 sub new {
     my $proto = shift;
@@ -345,6 +345,7 @@ sub add_roll {
         carp( "WTF?  Image ", $self->{ID}, " has roll ", $self->{Roll}, " but $rollid claims it.");
     }
 }
+
 =for go away
 sub DESTROY {
     my $self = shift;
