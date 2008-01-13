@@ -120,7 +120,7 @@ foreach my $img_num (
             print STDERR "  Warning: ", $exifTool->GetValue( 'Warning' ), "\n";
         }
 
-        print STDERR "   Found Tags ($file):\n", map( "    $_\n", $exifTool->GetFoundTags ), "\n\n";
+        # print STDERR "   Found Tags ($file):\n", map( "    $_\n", $exifTool->GetFoundTags ), "\n\n";
 
         my $comment = $exifTool->GetValue( 'Comment' );
         # $comment =~ s/\r//g;
@@ -145,10 +145,12 @@ foreach my $img_num (
 
         $comment = $image->{Comment};
         if ( defined($comment) ) {
-            foreach my $attr ( 'Description', 'Caption-Abstract' ) {
-                ($retval, $errstr) = $exifTool->SetNewValue( $attr, $comment );
-                if ( $retval == 0 || defined($errstr) ) {
-                    print STDERR "Error on $attr ($retval): $errstr\n";
+            if ( $comment !~ /^\s*$/ ) {
+                foreach my $attr ( 'Description', 'Caption-Abstract' ) {
+                    ($retval, $errstr) = $exifTool->SetNewValue( $attr, $comment );
+                    if ( $retval == 0 || defined($errstr) ) {
+                        print STDERR "Error on $attr ($retval): $errstr\n";
+                    }
                 }
             }
         }
@@ -176,6 +178,10 @@ foreach my $img_num (
             if ( $image->{RotatedOnly} ) {
                 push @keywords, 'iPhotoRotatedOnly';
             }
+        }
+
+        if ( scalar @files == 2 ) {
+            push @keywords, sprintf( 'iPhotoImage-%d', $image->{ID} );
         }
 
         print STDERR "Keywords: ", join( ',', @keywords ), "\n";
@@ -222,6 +228,42 @@ foreach my $img_num (
             print STDERR "Error on Rating ($retval): $errstr\n";
         }
 
+        # now for the real fun... fixing the dates.
+
+        print STDERR "Dates:\n";
+        foreach my $attr (
+            [ 'Date' => 'DateTimeOriginal' ],
+            [ 'Date' => 'CreateDate' ],
+            # [ 'Date' => 'DateTimeDigitized' ],
+            [ 'ModDate' => 'ModifyDate' ],
+        ) {
+            my ( $iattr, $eattr ) = @$attr;
+
+            print STDERR " Looking for $iattr/$eattr..\n";
+            my $ival = $image->{$iattr};
+            next unless ( defined( $ival ) );
+            my $ival_str = epoch_to_exif( $ival );
+            print STDERR "  Found $ival_str ($ival) in iPhoto $iattr...\n";
+            my $eval = $exifTool->GetValue( $eattr );
+
+            if ( $eval ) {
+                print STDERR "  Found $eval in EXIF $eattr\n";
+            } else {
+                print STDERR "  No EXIF $eattr found.\n";
+            }
+
+            if ( ! defined( $eval ) ) {
+                $exifTool->SetNewValue( $eattr, $ival_str );
+            }
+
+            if ( defined($eval) && $eval ne $ival_str ) {
+                print STDERR "  **** EXIF and iPhoto mismatch!\n";
+                $exifTool->SetNewValue( $eattr, $ival_str );
+            }
+
+        }
+
+
         print STDERR "Writing $file..\n";
         my $retval = $exifTool->WriteInfo( $file );
 
@@ -233,6 +275,20 @@ foreach my $img_num (
         }
     }
 
+}
+
+sub epoch_to_exif {
+    my $edate = shift;
+
+    return unless ( $edate );
+
+    my @date = localtime( $edate );
+
+    return sprintf(
+        '%04d:%02d:%02d %02d:%02d:%02d',
+        $date[5] + 1900, $date[4] + 1, $date[3],
+        $date[2], $date[1], $date[0]
+    );
 }
 
 sub album_path {
