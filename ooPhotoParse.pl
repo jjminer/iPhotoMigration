@@ -142,7 +142,7 @@ sub process_movie {
             $val =~ s/^\s*$//;
             $val =~ s/^\s*//;
             $val =~ s/\s*$//;
-            print TEXT "$key: $val", $movie->{$key}, "\n\n" if (
+            print TEXT "$key: $val\n\n" if (
                 defined($movie->{$key})
                 && $val !~ /^\s*$/
             );
