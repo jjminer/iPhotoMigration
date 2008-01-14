@@ -31,8 +31,6 @@ use Image::ExifTool;
 
 use Data::Dumper;
 
-# XXX - TODO: Deal with movies.
-
 my @library_options = (
     'AlbumData.xml',
     glob( '~/Pictures/iPhoto\ Library/AlbumData.xml' ),
@@ -93,6 +91,7 @@ else {
         23792,
         16043,
         778,
+        21640,
     );
 
     $num_toprocess = scalar @image_nums;
@@ -227,6 +226,9 @@ sub process_image {
         my $exifTool = new Image::ExifTool;
 
         $exifTool->Options( 'Composite' => 0 );
+        # $exifTool->Options( 'IgnoreMinorErrors' => 1 );
+        $exifTool->Options( 'FixBase' => 1 );
+        $exifTool->Options( 'MakerNotes' => 2 );
         # $exifTool->Options( 'TextOut' => \*VERBOSELOG );
         # $exifTool->Options( 'Verbose' => 3 );
 
@@ -239,8 +241,22 @@ sub process_image {
             print "  Error Value: ", $exifTool->GetValue('Error'), "\n";
         }
 
-        if ( $exifTool->GetValue( 'Warning' ) ) {
-            print "  Warning: ", $exifTool->GetValue( 'Warning' ), "\n";
+        my $nowrite_error = 0;
+
+        if ( scalar $exifTool->GetValue( 'Warning' ) ) {
+            print "  Warning on Load: ", $exifTool->GetValue( 'Warning' ), "\n";
+            if ( $exifTool->GetValue( 'Warning' ) eq 'Bad ExifIFD directory pointer for MakerNoteNikon3' ) {
+
+                # XXX - Need to figure out what we do here... can't write the
+                # file.  That's not good.
+                print " Writing info to text file...  Can't write.\n";
+                $nowrite_error = 1;
+            }
+        }
+
+        if ( scalar $exifTool->GetValue( 'Error' ) ) {
+            print STDERR "  Error on Load: ", $exifTool->GetValue( 'Error' ), "\n";
+            print "  Error on Load: ", $exifTool->GetValue( 'Error' ), "\n";
         }
 
         # print "   Found Tags ($file):\n", map( "    $_\n", $exifTool->GetFoundTags ), "\n\n";
@@ -400,9 +416,9 @@ sub process_image {
         print "No changes made on write..\n" if ($retval == 2);
 
         unless ($retval) {
-            print STDERR "\nError: ", $exifTool->GetValue( 'Error' );
-            print "Error: ", $exifTool->GetValue( 'Error' );
-            print "Warning: ", $exifTool->GetValue( 'Warning' );
+            print STDERR "\nError Writing: ", $exifTool->GetValue( 'Error' ), "\n";
+            print "Error Writing: ", $exifTool->GetValue( 'Error' ), "\n";
+            print "Warning Writing: ", $exifTool->GetValue( 'Warning' ), "\n";
         }
     }
 
