@@ -137,8 +137,16 @@ sub process_movie {
 
         print TEXT "Documentation for $file\n\n";
 
-        print TEXT "Caption: ", $movie->{Caption}, "\n\n" if ( $movie->{Caption} );
-        print TEXT "Comment: ", $movie->{Comment}, "\n\n" if ( $movie->{Comment} );
+        foreach my $key ( 'Caption', 'Comment' ) {
+            my $val = $movie->{$key};
+            $val =~ s/^\s*$//;
+            $val =~ s/^\s*//;
+            $val =~ s/\s*$//;
+            print TEXT "$key: $val", $movie->{$key}, "\n\n" if (
+                defined($movie->{$key})
+                && $val !~ /^\s*$/
+            );
+        }
 
         print TEXT "Roll: $roll\n\n";
         if ( scalar @keywords ) {
