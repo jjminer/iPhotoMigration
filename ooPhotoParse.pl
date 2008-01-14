@@ -31,6 +31,8 @@ use Image::ExifTool;
 
 use Data::Dumper;
 
+# XXX - TODO: Deal with movies.
+
 my @library_options = (
     'AlbumData.xml',
     glob( '~/Pictures/iPhoto\ Library/AlbumData.xml' ),
@@ -51,6 +53,9 @@ unless( defined($lib_file) ) {
     die( 'No suitable library found or specified.' );
 }
 
+my $starttime = time;
+print STDERR "Start: ", scalar localtime($starttime), "\n";
+
 print STDERR "Using Library file: $lib_file\n";
 
 my $library = new iPhotoLibrary(
@@ -58,25 +63,36 @@ my $library = new iPhotoLibrary(
     debug => 1,
 );
 
-my $file_loc = (
-    OriginalPath => 'Orig',
-    ImagePath => 'Mod',
-);
-
 open VERBOSELOG, ">>verbose_exif.log";
 
-foreach my $img_num (
-    5554,
-    23397,
-    6474,
-    7652,
-    21836,
-    21881,
-    23792,
-) {
-    my $image = $library->get_image( $img_num );
+if (1) {
+    foreach my $img ( $library->images ) {
+        process_image( $img );
+    }
+}
+else {
+    foreach my $img_num (
+        5554,
+        23397,
+        6474,
+        7652,
+        21836,
+        21881,
+        23792,
+    ) {
+        process_image( $library->get_image( $img_num ) );
+    }
+}
 
-    print STDERR "Image: ", $image->{ID}, "\n";
+my $finishtime = time;
+
+print "Finished: ", scalar localtime($finishtime), "\n";
+print "Elapsed time: ", $finishtime - $starttime, "\n";
+
+sub process_image {
+    my $image = shift;
+
+    print STDERR "\nImage: ", $image->{ID}, "\n";
     foreach my $key ( keys %{ $image } ) {
         print STDERR "   $key: ";
         if ( ref( $image->{$key} ) eq 'ARRAY' ) {
@@ -96,7 +112,7 @@ foreach my $img_num (
     # of the RAW.
     push @files, img_copy(
         defined( $image->{RAW} ) ? $image->{OriginalPath} : $image->{ImagePath},
-        'Images',
+        'Curr',
         $image->{Roll}
     );
 
@@ -106,8 +122,8 @@ foreach my $img_num (
         my $exifTool = new Image::ExifTool;
 
         $exifTool->Options( 'Composite' => 0 );
-        $exifTool->Options( 'TextOut' => \*VERBOSELOG );
-        $exifTool->Options( 'Verbose' => 3 );
+        # $exifTool->Options( 'TextOut' => \*VERBOSELOG );
+        # $exifTool->Options( 'Verbose' => 3 );
 
         print STDERR "Processing $file...\n";
 
@@ -159,7 +175,7 @@ foreach my $img_num (
         
         @keywords = map sprintf( 'iPhotoKeyword-%s', $library->get_keyword( $_ )), @{ $image->{Keywords} } if ( $image->{Keywords} );
 
-        print STDERR "Keywords 1: ", join( ', ', @keywords ), "\n";
+        # print STDERR "Keywords 1: ", join( ', ', @keywords ), "\n";
         
         my @albums = ();
         foreach my $a ( ref( $image->{Album} ) ? @{ $image->{Album} } : $image->{Album} ) {
@@ -169,7 +185,7 @@ foreach my $img_num (
         push @albums, sprintf( 'iPhotoRoll-%d-%s', $image->{Roll}, $library->{rolls}->{ $image->{Roll} }->{Name} );
 
         if ( defined($image->{OriginalPath}) ) {
-            print STDERR "Photo has Original Path.\n";
+            # print STDERR "Photo has Original Path.\n";
             if ( $file =~ /Orig/ ) {
                 push @keywords, 'iPhotoOriginalImage';
             } else {
@@ -184,8 +200,8 @@ foreach my $img_num (
             push @keywords, sprintf( 'iPhotoImage-%d', $image->{ID} );
         }
 
-        print STDERR "Keywords: ", join( ',', @keywords ), "\n";
-        print STDERR "Albums: ", join( ',', @albums ), "\n";
+        # print STDERR "Keywords: ", join( ',', @keywords ), "\n";
+        # print STDERR "Albums: ", join( ',', @albums ), "\n";
         if ( scalar @keywords || scalar @albums ) {
             print STDERR "Setting Keywords to: ", join( ',', @keywords, @albums ), "\n";
             ($retval, $errstr) = $exifTool->SetNewValue( 'Keywords', [ @keywords, @albums ] );
@@ -308,7 +324,7 @@ sub img_copy {
     my $dest = shift;
     my $roll = shift;
 
-    my $real_dest = join( '/', $dest, $roll );
+    my $real_dest = join( '/', 'Images', $dest, $roll );
 
     mkdir $real_dest if ( ! -d $real_dest );
 
