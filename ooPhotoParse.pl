@@ -65,9 +65,9 @@ my $library = new iPhotoLibrary(
 
 open VERBOSELOG, ">>verbose_exif.log";
 
-if (1) {
+if (0) {
     foreach my $img ( $library->images ) {
-        process_image( $img );
+        process_item( $img );
     }
 }
 else {
@@ -79,8 +79,9 @@ else {
         21836,
         21881,
         23792,
+        16043,
     ) {
-        process_image( $library->get_image( $img_num ) );
+        process_item( $library->get_image( $img_num ) );
     }
 }
 
@@ -89,29 +90,90 @@ my $finishtime = time;
 print "Finished: ", scalar localtime($finishtime), "\n";
 print "Elapsed time: ", $finishtime - $starttime, "\n";
 
-sub process_image {
-    my $image = shift;
+sub process_item {
+    my $item = shift;
 
-    print STDERR "\nImage: ", $image->{ID}, "\n";
-    foreach my $key ( keys %{ $image } ) {
-        print STDERR "   $key: ";
-        if ( ref( $image->{$key} ) eq 'ARRAY' ) {
-            print STDERR join( ', ', @{$image->{$key}});
-        } else {
-            print STDERR $image->{$key};
-        }
-        print STDERR "\n";
+    print STDERR "\nItem: ", $item->{ID}, "\n";
+
+    dump_iphoto_info( $item );
+
+    if ( $item->{MediaType} eq 'Image' ) {
+        process_image( $item );
     }
+    elsif ($item->{MediaType} eq 'Movie' ) {
+        process_movie( $item );
+    }
+
+}
+
+sub process_movie {
+    my $movie = shift;
+
+    my @files = ();
+    if ( defined($movie->{OriginalPath}) ) {
+        push @files, img_copy(  $movie->{OriginalPath}, 'Movies', 'Orig', $movie->{Roll} );
+    }
+    push @files, img_copy(
+        $movie->{ImagePath},
+        'Movies',
+        'Curr',
+        $movie->{Roll}
+    );
+
+    foreach my $file ( @files ) {
+        my @keywords = ();
+
+        @keywords = map sprintf( '%s', $library->get_keyword( $_ )), @{ $movie->{Keywords} } if ( $movie->{Keywords} );
+
+        # print STDERR "Keywords 1: ", join( ', ', @keywords ), "\n";
+        
+        my @albums = ();
+        foreach my $a ( ref( $movie->{Album} ) ? @{ $movie->{Album} } : $movie->{Album} ) {
+            push @albums, sprintf( '%s', join( ' / ', map( $library->get_album( $_ )->{Name}, $library->get_album( $a )->album_path ) ) ) if (defined($a));
+        }
+
+        my $roll = sprintf( '%d-%s', $movie->{Roll}, $library->{rolls}->{ $movie->{Roll} }->{Name} );
+        open TEXT, ">$file.txt";
+
+        print TEXT "Documentation for $file\n\n";
+
+        print TEXT "Caption: ", $movie->{Caption}, "\n\n" if ( $movie->{Caption} );
+        print TEXT "Comment: ", $movie->{Comment}, "\n\n" if ( $movie->{Comment} );
+
+        print TEXT "Roll: $roll\n\n";
+        if ( scalar @keywords ) {
+            print TEXT "Keywords:\n";
+            print TEXT map "  $_\n", @keywords;
+            print TEXT "\n";
+        }
+
+        if ( scalar @albums ) {
+            print TEXT "Albums:\n";
+            print TEXT map "  $_\n", @albums;
+            print TEXT "\n";
+        }
+
+        print TEXT "Rating: ", $movie->{Rating}, "\n";
+
+        close TEXT;
+
+    }
+}
+
+sub process_image {
+
+    my $image = shift;
 
     my @files = ();
 
     if ( defined($image->{OriginalPath}) && ! defined( $image->{RAW} )) {
-        push @files, img_copy(  $image->{OriginalPath}, 'Orig', $image->{Roll} );
+        push @files, img_copy(  $image->{OriginalPath}, 'Images', 'Orig', $image->{Roll} );
     }
     # If RAW, copy it to the image directory and skip the JPG, it's only a cache
     # of the RAW.
     push @files, img_copy(
         defined( $image->{RAW} ) ? $image->{OriginalPath} : $image->{ImagePath},
+        'Images',
         'Curr',
         $image->{Roll}
     );
@@ -172,7 +234,7 @@ sub process_image {
         }
 
         my @keywords = ();
-        
+
         @keywords = map sprintf( 'iPhotoKeyword-%s', $library->get_keyword( $_ )), @{ $image->{Keywords} } if ( $image->{Keywords} );
 
         # print STDERR "Keywords 1: ", join( ', ', @keywords ), "\n";
@@ -293,6 +355,20 @@ sub process_image {
 
 }
 
+sub dump_iphoto_info {
+    my $image = shift;
+
+    foreach my $key ( keys %{ $image } ) {
+        print STDERR "   $key: ";
+        if ( ref( $image->{$key} ) eq 'ARRAY' ) {
+            print STDERR join( ', ', @{$image->{$key}});
+        } else {
+            print STDERR $image->{$key};
+        }
+        print STDERR "\n";
+    }
+}
+
 sub epoch_to_exif {
     my $edate = shift;
 
@@ -321,12 +397,25 @@ sub album_path {
 
 sub img_copy {
     my $orig = shift;
+    my $media = shift;
     my $dest = shift;
     my $roll = shift;
 
-    my $real_dest = join( '/', 'Images', $dest, $roll );
+    my $real_dest = undef;
+    
+    foreach my $dir ( $media, $dest, $roll ) {
+        if (defined($real_dest)) {
+            $real_dest .= "/$dir";
+        }
+        else {
+            $real_dest = $dir;
+        }
+        if ( ! -d $real_dest ) {
+            mkdir $real_dest;
+            print STDERR "Making: $real_dest\n";
+        }
 
-    mkdir $real_dest if ( ! -d $real_dest );
+    }
 
     my $basename = basename( $orig );
 
