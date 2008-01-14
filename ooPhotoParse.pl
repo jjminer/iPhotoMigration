@@ -55,23 +55,35 @@ unless( defined($lib_file) ) {
 
 my $starttime = time;
 print STDERR "Start: ", scalar localtime($starttime), "\n";
+print "Start: ", scalar localtime($starttime), "\n";
 
 print STDERR "Using Library file: $lib_file\n";
+print "Using Library file: $lib_file\n";
 
 my $library = new iPhotoLibrary(
     file => $lib_file,
     debug => 1,
 );
 
+my $starttime2 = time;
+print STDERR "Post Library Start: ", scalar localtime($starttime2), "\n";
+print "Post Library Start: ", scalar localtime($starttime2), "\n";
+
 open VERBOSELOG, ">>verbose_exif.log";
 
+my $num_processed = 0;
+my $num_toprocess = undef;
+
 if (0) {
+    $num_toprocess = scalar keys %{$library->{images}};
+    print STDERR "Number to process: $num_toprocess\n";
+
     foreach my $img ( $library->images ) {
         process_item( $img );
     }
 }
 else {
-    foreach my $img_num (
+    my @image_nums = (
         5554,
         23397,
         6474,
@@ -80,20 +92,35 @@ else {
         21881,
         23792,
         16043,
-    ) {
+        778,
+    );
+
+    $num_toprocess = scalar @image_nums;
+    print STDERR "Number to process: $num_toprocess\n";
+
+    foreach my $img_num ( @image_nums ) {
         process_item( $library->get_image( $img_num ) );
     }
 }
 
 my $finishtime = time;
 
+print STDERR "\n\nFinished: ", scalar localtime($finishtime), "\n";
 print "Finished: ", scalar localtime($finishtime), "\n";
+
+print STDERR "Elapsed time: ", $finishtime - $starttime, "\n";
 print "Elapsed time: ", $finishtime - $starttime, "\n";
+
+print STDERR "Elapsed non-library load time: ", $finishtime - $starttime2, "\n";
+print "Elapsed non-library load time: ", $finishtime - $starttime2, "\n";
 
 sub process_item {
     my $item = shift;
 
-    print STDERR "\nItem: ", $item->{ID}, "\n";
+    print STDERR "." if ( (++$num_processed % 100) == 0);
+    print STDERR "$num_processed/$num_toprocess" if ( ($num_processed % 1000 ) == 0 );
+
+    print "\nItem: ", $item->{ID}, " ($num_processed/$num_toprocess)\n";
 
     dump_iphoto_info( $item );
 
@@ -125,7 +152,7 @@ sub process_movie {
 
         @keywords = map sprintf( '%s', $library->get_keyword( $_ )), @{ $movie->{Keywords} } if ( $movie->{Keywords} );
 
-        # print STDERR "Keywords 1: ", join( ', ', @keywords ), "\n";
+        # print "Keywords 1: ", join( ', ', @keywords ), "\n";
         
         my @albums = ();
         foreach my $a ( ref( $movie->{Album} ) ? @{ $movie->{Album} } : $movie->{Album} ) {
@@ -174,8 +201,16 @@ sub process_image {
 
     my @files = ();
 
+    my $oddcase = 0;
+
     if ( defined($image->{OriginalPath}) && ! defined( $image->{RAW} )) {
-        push @files, img_copy(  $image->{OriginalPath}, 'Images', 'Orig', $image->{Roll} );
+        if ( ! -e $image->{OriginalPath} && -e $image->{ImagePath} ) {
+            print STDERR "\n Weird.  Original missing, but Modified exists for ", $image->{ID}, "\n";
+            print " Weird.  Original missing, but Modified exists for ", $image->{ID}, "\n";
+            $oddcase = 1;
+        } else {
+            push @files, img_copy(  $image->{OriginalPath}, 'Images', 'Orig', $image->{Roll} );
+        }
     }
     # If RAW, copy it to the image directory and skip the JPG, it's only a cache
     # of the RAW.
@@ -186,7 +221,7 @@ sub process_image {
         $image->{Roll}
     );
 
-    print STDERR "Files: ", join( ',', @files ), "\n";
+    print "Files: ", join( ',', @files ), "\n";
 
     foreach my $file ( @files ) {
         my $exifTool = new Image::ExifTool;
@@ -195,25 +230,27 @@ sub process_image {
         # $exifTool->Options( 'TextOut' => \*VERBOSELOG );
         # $exifTool->Options( 'Verbose' => 3 );
 
-        print STDERR "Processing $file...\n";
+        print "Processing $file...\n";
 
         unless( $exifTool->ExtractInfo( $file ) ) {
-            print STDERR "  Error reading $file.. WTF?\n";
-            print STDERR "  Error Value: ", $exifTool->GetValue('Error'), "\n";
+            print STDERR "\n  Error reading $file.. WTF?\n";
+            print STDERR "\n  Error Value: ", $exifTool->GetValue('Error'), "\n";
+            print "  Error reading $file.. WTF?\n";
+            print "  Error Value: ", $exifTool->GetValue('Error'), "\n";
         }
 
         if ( $exifTool->GetValue( 'Warning' ) ) {
-            print STDERR "  Warning: ", $exifTool->GetValue( 'Warning' ), "\n";
+            print "  Warning: ", $exifTool->GetValue( 'Warning' ), "\n";
         }
 
-        # print STDERR "   Found Tags ($file):\n", map( "    $_\n", $exifTool->GetFoundTags ), "\n\n";
+        # print "   Found Tags ($file):\n", map( "    $_\n", $exifTool->GetFoundTags ), "\n\n";
 
         my $comment = $exifTool->GetValue( 'Comment' );
         # $comment =~ s/\r//g;
-        print STDERR "Comment: $comment\n" if ( $comment );
+        print "Comment: $comment\n" if ( $comment );
 
         if ( $comment =~ /KONICA MINOLTA DIGITAL CAMERA/ ) {
-            print STDERR "  Comment is camera!\n";
+            print "  Comment is camera!\n";
             # delete it.
             $exifTool->SetNewValue( 'Comment' );
         }
@@ -221,7 +258,7 @@ sub process_image {
         my $descr = $exifTool->GetValue( 'ImageDescription' );
 
         if ( $descr  =~ /KONICA MINOLTA DIGITAL CAMERA/ ) {
-            print STDERR "  Description is camera!\n";
+            print "  Description is camera!\n";
             # delete it.
             $exifTool->SetNewValue( 'ImageDescription' );
         }
@@ -235,7 +272,8 @@ sub process_image {
                 foreach my $attr ( 'Description', 'Caption-Abstract' ) {
                     ($retval, $errstr) = $exifTool->SetNewValue( $attr, $comment );
                     if ( $retval == 0 || defined($errstr) ) {
-                        print STDERR "Error on $attr ($retval): $errstr\n";
+                        print STDERR "\nError on $attr ($retval): $errstr\n";
+                        print "Error on $attr ($retval): $errstr\n";
                     }
                 }
             }
@@ -245,7 +283,7 @@ sub process_image {
 
         @keywords = map sprintf( 'iPhotoKeyword-%s', $library->get_keyword( $_ )), @{ $image->{Keywords} } if ( $image->{Keywords} );
 
-        # print STDERR "Keywords 1: ", join( ', ', @keywords ), "\n";
+        # print "Keywords 1: ", join( ', ', @keywords ), "\n";
         
         my @albums = ();
         foreach my $a ( ref( $image->{Album} ) ? @{ $image->{Album} } : $image->{Album} ) {
@@ -255,7 +293,7 @@ sub process_image {
         push @albums, sprintf( 'iPhotoRoll-%d-%s', $image->{Roll}, $library->{rolls}->{ $image->{Roll} }->{Name} );
 
         if ( defined($image->{OriginalPath}) ) {
-            # print STDERR "Photo has Original Path.\n";
+            # print "Photo has Original Path.\n";
             if ( $file =~ /Orig/ ) {
                 push @keywords, 'iPhotoOriginalImage';
             } else {
@@ -266,23 +304,26 @@ sub process_image {
             }
         }
 
+        push @keywords, 'iPhotoMissingOriginal' if ( $oddcase );
+
         if ( scalar @files == 2 ) {
             push @keywords, sprintf( 'iPhotoImage-%d', $image->{ID} );
         }
 
-        # print STDERR "Keywords: ", join( ',', @keywords ), "\n";
-        # print STDERR "Albums: ", join( ',', @albums ), "\n";
+        # print "Keywords: ", join( ',', @keywords ), "\n";
+        # print "Albums: ", join( ',', @albums ), "\n";
         if ( scalar @keywords || scalar @albums ) {
-            print STDERR "Setting Keywords to: ", join( ',', @keywords, @albums ), "\n";
+            print "Setting Keywords to: ", join( ',', @keywords, @albums ), "\n";
             ($retval, $errstr) = $exifTool->SetNewValue( 'Keywords', [ @keywords, @albums ] );
-            print STDERR "Set $retval values..\n";
+            print "Set $retval values..\n";
             if ( defined($errstr) ) {
-                print STDERR "Error on Keywords ($retval): $errstr\n";
+                print STDERR "\nError on Keywords ($retval): $errstr\n";
+                print "Error on Keywords ($retval): $errstr\n";
             }
         }
 
         my $caption = $image->{Caption};
-        print STDERR "Caption: $caption\n";
+        print "Caption: $caption\n";
         if (
             $caption eq basename( $file )
             || $caption eq basename( $file, '.jpg' )
@@ -292,31 +333,34 @@ sub process_image {
             || $caption eq basename( $file, '.nef' )
             || $caption eq basename( $file, '.NEF' )
         ) {
-            print STDERR "Caption is Base name.\n";
+            print "Caption is Base name.\n";
             $caption = undef;
         }
 
         ($retval, $errstr) = $exifTool->SetNewValue( 'Title', $caption ) if ( defined($caption) );
         if ( $retval == 0 || defined($errstr) ) {
-            print STDERR "Error on Title ($retval): $errstr\n";
+            print STDERR "\nError on Title ($retval): $errstr\n";
+            print "Error on Title ($retval): $errstr\n";
         }
         ($retval, $errstr) = $exifTool->SetNewValue( 'ObjectName', $caption ) if ( defined($caption) );
         if ( $retval == 0 || defined($errstr) ) {
-            print STDERR "Error on ObjectName ($retval): $errstr\n";
+            print STDERR "\nError on ObjectName ($retval): $errstr\n";
+            print "Error on ObjectName ($retval): $errstr\n";
         }
 
         my $rating = $image->{Rating};
 
-        print STDERR "Rating: $rating\n";
+        print "Rating: $rating\n";
 
         ($retval, $errstr) = $exifTool->SetNewValue( 'Rating', $image->{Rating} ) if ( $image->{Rating} );
         if ( $retval == 0 || defined($errstr) ) {
-            print STDERR "Error on Rating ($retval): $errstr\n";
+            print STDERR "\nError on Rating ($retval): $errstr\n";
+            print "Error on Rating ($retval): $errstr\n";
         }
 
         # now for the real fun... fixing the dates.
 
-        print STDERR "Dates:\n";
+        print "Dates:\n";
         foreach my $attr (
             [ 'Date' => 'DateTimeOriginal' ],
             [ 'Date' => 'CreateDate' ],
@@ -325,17 +369,17 @@ sub process_image {
         ) {
             my ( $iattr, $eattr ) = @$attr;
 
-            print STDERR " Looking for $iattr/$eattr..\n";
+            print " Looking for $iattr/$eattr..\n";
             my $ival = $image->{$iattr};
             next unless ( defined( $ival ) );
             my $ival_str = epoch_to_exif( $ival );
-            print STDERR "  Found $ival_str ($ival) in iPhoto $iattr...\n";
+            print "  Found $ival_str ($ival) in iPhoto $iattr...\n";
             my $eval = $exifTool->GetValue( $eattr );
 
             if ( $eval ) {
-                print STDERR "  Found $eval in EXIF $eattr\n";
+                print "  Found $eval in EXIF $eattr\n";
             } else {
-                print STDERR "  No EXIF $eattr found.\n";
+                print "  No EXIF $eattr found.\n";
             }
 
             if ( ! defined( $eval ) ) {
@@ -343,21 +387,22 @@ sub process_image {
             }
 
             if ( defined($eval) && $eval ne $ival_str ) {
-                print STDERR "  **** EXIF and iPhoto mismatch!\n";
+                print "  **** EXIF and iPhoto mismatch!\n";
                 $exifTool->SetNewValue( $eattr, $ival_str );
             }
 
         }
 
 
-        print STDERR "Writing $file..\n";
+        print "Writing $file..\n";
         my $retval = $exifTool->WriteInfo( $file );
 
-        print STDERR "No changes made on write..\n" if ($retval == 2);
+        print "No changes made on write..\n" if ($retval == 2);
 
         unless ($retval) {
-            print STDERR "Error: ", $exifTool->GetValue( 'Error' );
-            print STDERR "Warning: ", $exifTool->GetValue( 'Warning' );
+            print STDERR "\nError: ", $exifTool->GetValue( 'Error' );
+            print "Error: ", $exifTool->GetValue( 'Error' );
+            print "Warning: ", $exifTool->GetValue( 'Warning' );
         }
     }
 
@@ -367,13 +412,13 @@ sub dump_iphoto_info {
     my $image = shift;
 
     foreach my $key ( keys %{ $image } ) {
-        print STDERR "   $key: ";
+        print "   $key: ";
         if ( ref( $image->{$key} ) eq 'ARRAY' ) {
-            print STDERR join( ', ', @{$image->{$key}});
+            print join( ', ', @{$image->{$key}});
         } else {
-            print STDERR $image->{$key};
+            print $image->{$key};
         }
-        print STDERR "\n";
+        print "\n";
     }
 }
 
@@ -420,16 +465,20 @@ sub img_copy {
         }
         if ( ! -d $real_dest ) {
             mkdir $real_dest;
-            print STDERR "Making: $real_dest\n";
+            print "Making: $real_dest\n";
         }
 
     }
 
     my $basename = basename( $orig );
 
-    print STDERR "Copying $basename to $real_dest\n";
+    print "Copying $basename to $real_dest\n";
 
-    copy( $orig, $real_dest ) or die( "Copy failed: $!" );
+    unless ( copy( $orig, $real_dest ) ) {
+        print STDERR "Copying $orig to $real_dest failed with: $!\n";
+        print "Copying $orig to $real_dest failed with: $!\n";
+        die( "Copy failed: $!" );
+    }
 
     return join( '/', $real_dest, $basename );
 }
