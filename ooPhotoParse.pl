@@ -226,13 +226,19 @@ sub process_image {
         my $exifTool = new Image::ExifTool;
 
         $exifTool->Options( 'Composite' => 0 );
+ 
+        # Dammit.  None of these seem to work with the NikonMaker error.  Stupid
+        # stupid.
         # $exifTool->Options( 'IgnoreMinorErrors' => 1 );
-        $exifTool->Options( 'FixBase' => 1 );
-        $exifTool->Options( 'MakerNotes' => 2 );
+        # $exifTool->Options( 'FixBase' => 1 );
+        # $exifTool->Options( 'IgnoreMinorErrors' => 1 );
+        # $exifTool->Options( 'MakerNotes' => 2 );
+        #
         # $exifTool->Options( 'TextOut' => \*VERBOSELOG );
         # $exifTool->Options( 'Verbose' => 3 );
 
-        print "Processing $file...\n";
+        my $basename = basename( $file );
+        print "Processing $basename ($file)...\n";
 
         unless( $exifTool->ExtractInfo( $file ) ) {
             print STDERR "\n  Error reading $file.. WTF?\n";
@@ -243,6 +249,9 @@ sub process_image {
 
         my $nowrite_error = 0;
 
+        my $fh = undef;
+        my $move_to_dir = undef;
+
         if ( scalar $exifTool->GetValue( 'Warning' ) ) {
             print "  Warning on Load: ", $exifTool->GetValue( 'Warning' ), "\n";
             if ( $exifTool->GetValue( 'Warning' ) eq 'Bad ExifIFD directory pointer for MakerNoteNikon3' ) {
@@ -251,6 +260,14 @@ sub process_image {
                 # file.  That's not good.
                 print " Writing info to text file...  Can't write.\n";
                 $nowrite_error = 1;
+
+                $move_to_dir = mkdir_path(
+                    'Bad_Images',
+                    $file =~ m!/Orig/! ? 'Orig' : 'Curr',
+                    $image->{Roll},
+                );
+
+                $fh = new IO::File( "> $move_to_dir/$basename-info.txt" );
             }
         }
 
@@ -292,6 +309,11 @@ sub process_image {
                         print "Error on $attr ($retval): $errstr\n";
                     }
                 }
+
+                if ( $nowrite_error && defined($fh) ) {
+                    $fh->print( "Comment:\n  $comment\n\n" );
+                }
+
             }
         }
 
@@ -336,6 +358,10 @@ sub process_image {
                 print STDERR "\nError on Keywords ($retval): $errstr\n";
                 print "Error on Keywords ($retval): $errstr\n";
             }
+            if ( $nowrite_error && defined($fh) ) {
+                $fh->print( "Albums:\n", map( "  $_\n", @albums ), "\n" ) if ( scalar @albums );
+                $fh->print( "Keywords:\n", map( "  $_\n", @keywords ), "\n" ) if ( scalar @keywords );
+            }
         }
 
         my $caption = $image->{Caption};
@@ -364,6 +390,10 @@ sub process_image {
             print "Error on ObjectName ($retval): $errstr\n";
         }
 
+        if ( $nowrite_error && defined($fh) && defined($caption) ) {
+            $fh->print( "Caption: $caption\n\n" );
+        }
+
         my $rating = $image->{Rating};
 
         print "Rating: $rating\n";
@@ -372,6 +402,10 @@ sub process_image {
         if ( $retval == 0 || defined($errstr) ) {
             print STDERR "\nError on Rating ($retval): $errstr\n";
             print "Error on Rating ($retval): $errstr\n";
+        }
+
+        if ( $nowrite_error && defined($fh) && $rating ) {
+            $fh->print( "Rating: $rating\n\n" );
         }
 
         # now for the real fun... fixing the dates.
@@ -409,18 +443,37 @@ sub process_image {
 
         }
 
+        if ( $nowrite_error && defined($fh) && $image->{Date} ) {
+            $fh->print( "iPhoto Date: ", epoch_to_exif( $image->{Date} ), "\n" );
+        }
+
+        if ( $nowrite_error && defined($fh) && $image->{ModDate} ) {
+            $fh->print( "iPhoto ModDate: ", epoch_to_exif( $image->{ModDate} ), "\n" );
+        }
+
 
         print "Writing $file..\n";
-        my $retval = $exifTool->WriteInfo( $file );
 
-        print "No changes made on write..\n" if ($retval == 2);
+        if ( ! $nowrite_error ) {
+            my $retval = $exifTool->WriteInfo( $file );
 
-        unless ($retval) {
-            print STDERR "\nError Writing: ", $exifTool->GetValue( 'Error' ), "\n";
-            print "Error Writing: ", $exifTool->GetValue( 'Error' ), "\n";
-            print "Warning Writing: ", $exifTool->GetValue( 'Warning' ), "\n";
+            print "No changes made on write..\n" if ($retval == 2);
+
+            unless ($retval) {
+                print STDERR "\nError Writing: ", $exifTool->GetValue( 'Error' ), "\n";
+                print "Error Writing: ", $exifTool->GetValue( 'Error' ), "\n";
+                print "Warning Writing: ", $exifTool->GetValue( 'Warning' ), "\n";
+            }
         }
+        else {
+            print "Cannot write $file, moved to ", img_move( $file, $move_to_dir ), "\n";
+
+            $fh->close() if ( defined( $fh ) );
+        }
+        print "\n";
+
     }
+    print "\n";
 
 }
 
@@ -470,9 +523,46 @@ sub img_copy {
     my $dest = shift;
     my $roll = shift;
 
+    my $basename = basename( $orig );
+
+    my $real_dest = mkdir_path( $media, $dest, $roll );
+
+    print "Copying $basename to $real_dest\n";
+
+    unless ( copy( $orig, $real_dest ) ) {
+        print STDERR "Copying $orig to $real_dest failed with: $!\n";
+        print "Copying $orig to $real_dest failed with: $!\n";
+        die( "Copy failed: $!" );
+    }
+
+    return join( '/', $real_dest, $basename );
+}
+
+sub img_move {
+    my $source = shift;
+    my $dest = shift;
+
+    my $basename = basename( $source );
+
+    print "Moving $basename from $source to $dest\n";
+
+    unless ( move( $source, $dest ) ) {
+        print STDERR "Moving $source to $dest failed with: $!\n";
+        print "Moving $source to $dest failed with: $!\n";
+        die( "Move failed: $!" );
+    }
+
+    return -d $dest ? join( '/', $dest, $basename ) : $dest;
+}
+
+sub mkdir_path {
+    my @path = @_;
+
+    return unless ( scalar @path );
+
     my $real_dest = undef;
-    
-    foreach my $dir ( $media, $dest, $roll ) {
+
+    foreach my $dir ( @path ) {
         if (defined($real_dest)) {
             $real_dest .= "/$dir";
         }
@@ -486,15 +576,5 @@ sub img_copy {
 
     }
 
-    my $basename = basename( $orig );
-
-    print "Copying $basename to $real_dest\n";
-
-    unless ( copy( $orig, $real_dest ) ) {
-        print STDERR "Copying $orig to $real_dest failed with: $!\n";
-        print "Copying $orig to $real_dest failed with: $!\n";
-        die( "Copy failed: $!" );
-    }
-
-    return join( '/', $real_dest, $basename );
+    return $real_dest;
 }
