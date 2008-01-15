@@ -28,6 +28,7 @@ use iPhotoLibrary;
 use File::Copy;
 use File::Basename;
 use Image::ExifTool;
+use IO::File;
 
 use Data::Dumper;
 
@@ -71,6 +72,7 @@ open VERBOSELOG, ">>verbose_exif.log";
 
 my $num_processed = 0;
 my $num_toprocess = undef;
+my $write_error_count = 0;
 
 if (0) {
     $num_toprocess = scalar keys %{$library->{images}};
@@ -92,6 +94,7 @@ else {
         16043,
         778,
         21640,
+        23058,
     );
 
     $num_toprocess = scalar @image_nums;
@@ -113,11 +116,14 @@ print "Elapsed time: ", $finishtime - $starttime, "\n";
 print STDERR "Elapsed non-library load time: ", $finishtime - $starttime2, "\n";
 print "Elapsed non-library load time: ", $finishtime - $starttime2, "\n";
 
+print STDERR "Num Processed: $num_processed of $num_toprocess with $write_error_count errors\n";
+print "Num Processed: $num_processed of $num_toprocess with $write_error_count errors\n";
+
 sub process_item {
     my $item = shift;
 
-    print STDERR "." if ( (++$num_processed % 100) == 0);
-    print STDERR "$num_processed/$num_toprocess" if ( ($num_processed % 1000 ) == 0 );
+    print STDERR "." if ( (++$num_processed % 50) == 0);
+    print STDERR "$num_processed/$num_toprocess/$write_error_count" if ( ($num_processed % 500 ) == 0 );
 
     print "\nItem: ", $item->{ID}, " ($num_processed/$num_toprocess)\n";
 
@@ -229,9 +235,8 @@ sub process_image {
  
         # Dammit.  None of these seem to work with the NikonMaker error.  Stupid
         # stupid.
-        # $exifTool->Options( 'IgnoreMinorErrors' => 1 );
+        $exifTool->Options( 'IgnoreMinorErrors' => 1 );
         # $exifTool->Options( 'FixBase' => 1 );
-        # $exifTool->Options( 'IgnoreMinorErrors' => 1 );
         # $exifTool->Options( 'MakerNotes' => 2 );
         #
         # $exifTool->Options( 'TextOut' => \*VERBOSELOG );
@@ -247,27 +252,22 @@ sub process_image {
             print "  Error Value: ", $exifTool->GetValue('Error'), "\n";
         }
 
-        my $nowrite_error = 0;
+        my $write_error = 0;
 
-        my $fh = undef;
+        my @file_notes = ();
         my $move_to_dir = undef;
 
         if ( scalar $exifTool->GetValue( 'Warning' ) ) {
             print "  Warning on Load: ", $exifTool->GetValue( 'Warning' ), "\n";
-            if ( $exifTool->GetValue( 'Warning' ) eq 'Bad ExifIFD directory pointer for MakerNoteNikon3' ) {
+            if (
+                $exifTool->GetValue( 'Warning' ) eq 'Bad ExifIFD directory pointer for MakerNoteNikon3'
+            ) {
+                # Handle the case where we can't write the file.  Not sure why
+                # this comes up as an "Warning" .. It's fatal.
 
-                # XXX - Need to figure out what we do here... can't write the
-                # file.  That's not good.
                 print " Writing info to text file...  Can't write.\n";
-                $nowrite_error = 1;
+                $write_error = 1;
 
-                $move_to_dir = mkdir_path(
-                    'Bad_Images',
-                    $file =~ m!/Orig/! ? 'Orig' : 'Curr',
-                    $image->{Roll},
-                );
-
-                $fh = new IO::File( "> $move_to_dir/$basename-info.txt" );
             }
         }
 
@@ -310,9 +310,7 @@ sub process_image {
                     }
                 }
 
-                if ( $nowrite_error && defined($fh) ) {
-                    $fh->print( "Comment:\n  $comment\n\n" );
-                }
+                push @file_notes, "Comment:\n  $comment\n\n";
 
             }
         }
@@ -358,10 +356,8 @@ sub process_image {
                 print STDERR "\nError on Keywords ($retval): $errstr\n";
                 print "Error on Keywords ($retval): $errstr\n";
             }
-            if ( $nowrite_error && defined($fh) ) {
-                $fh->print( "Albums:\n", map( "  $_\n", @albums ), "\n" ) if ( scalar @albums );
-                $fh->print( "Keywords:\n", map( "  $_\n", @keywords ), "\n" ) if ( scalar @keywords );
-            }
+            push @file_notes, ( "Albums:\n", map( "  $_\n", @albums ), "\n" ) if ( scalar @albums );
+            push @file_notes, ( "Keywords:\n", map( "  $_\n", @keywords ), "\n" ) if ( scalar @keywords );
         }
 
         my $caption = $image->{Caption};
@@ -390,8 +386,8 @@ sub process_image {
             print "Error on ObjectName ($retval): $errstr\n";
         }
 
-        if ( $nowrite_error && defined($fh) && defined($caption) ) {
-            $fh->print( "Caption: $caption\n\n" );
+        if ( defined($caption) ) {
+            push @file_notes, "Caption: $caption\n\n";
         }
 
         my $rating = $image->{Rating};
@@ -404,8 +400,8 @@ sub process_image {
             print "Error on Rating ($retval): $errstr\n";
         }
 
-        if ( $nowrite_error && defined($fh) && $rating ) {
-            $fh->print( "Rating: $rating\n\n" );
+        if ( $rating ) {
+            push @file_notes, "Rating: $rating\n\n";
         }
 
         # now for the real fun... fixing the dates.
@@ -443,30 +439,65 @@ sub process_image {
 
         }
 
-        if ( $nowrite_error && defined($fh) && $image->{Date} ) {
-            $fh->print( "iPhoto Date: ", epoch_to_exif( $image->{Date} ), "\n" );
+        if ( $image->{Date} ) {
+            push @file_notes, ( "iPhoto Date: ", epoch_to_exif( $image->{Date} ), "\n" );
         }
 
-        if ( $nowrite_error && defined($fh) && $image->{ModDate} ) {
-            $fh->print( "iPhoto ModDate: ", epoch_to_exif( $image->{ModDate} ), "\n" );
+        if ( $image->{ModDate} ) {
+            push @file_notes, ( "iPhoto ModDate: ", epoch_to_exif( $image->{ModDate} ), "\n" );
         }
 
 
         print "Writing $file..\n";
 
-        if ( ! $nowrite_error ) {
+        if ( ! $write_error ) {
             my $retval = $exifTool->WriteInfo( $file );
 
             print "No changes made on write..\n" if ($retval == 2);
 
             unless ($retval) {
-                print STDERR "\nError Writing: ", $exifTool->GetValue( 'Error' ), "\n";
                 print "Error Writing: ", $exifTool->GetValue( 'Error' ), "\n";
                 print "Warning Writing: ", $exifTool->GetValue( 'Warning' ), "\n";
+
+                $write_error = 1;
             }
         }
-        else {
-            print "Cannot write $file, moved to ", img_move( $file, $move_to_dir ), "\n";
+
+        if ( $write_error ) {
+
+            $write_error_count++;
+
+            $move_to_dir = mkdir_path(
+                'Bad_Images',
+                $file =~ m!/Orig/! ? 'Orig' : 'Curr',
+                $image->{Roll},
+            );
+
+            my $fh = new IO::File( "> $move_to_dir/$basename-info.txt" );
+            
+            $fh->print( @file_notes );
+
+            if (1) {
+                print "Cannot write $file, moved to ", img_move( $file, $move_to_dir ), "\n";
+            }
+            else {
+                # Unfortunately, this doesn't work.  It would be nice if it did,
+                # wouldn't it..
+                print "Trying to write to new file to avoid errors...\n";
+
+                my $retval = $exifTool->WriteInfo( $file, "$file-tmp" );
+
+                print "No changes made on write..\n" if ($retval == 2);
+
+                unless ($retval) {
+                    print STDERR "\nError Writing: ", $exifTool->GetValue( 'Error' ), "\n";
+                    print "Error Writing: ", $exifTool->GetValue( 'Error' ), "\n";
+                    print "Warning Writing: ", $exifTool->GetValue( 'Warning' ), "\n";
+                }
+
+                print "Moving original $file to ", img_move( $file, $move_to_dir ), "\n";
+                print "Moving temp $file-tmp to ", img_move( "$file-tmp", $file ), "\n";
+            }
 
             $fh->close() if ( defined( $fh ) );
         }
